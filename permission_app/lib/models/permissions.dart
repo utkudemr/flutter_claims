@@ -1,84 +1,38 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
 import 'package:reflectable/mirrors.dart';
 
 import 'claims.dart';
 import 'reflector.dart';
 import 'user_claim.dart';
 
-class Permission {
-  static bool paymentPageLockIconStatus =
-      false; //ödeme sayfasındaki kilit ikonu
-  static bool productPageLockIconStatus =
-      false; //barcode sayfasındaki kilit ikonu
-  static bool initialPage =
-      true; //sayfa ilk açıldığında işlem yapılmış mı kontrolü
+abstract class IPermission {
+  Future<UserClaim> permissionControl(
+      VoidCallback parameterAsFunction, BuildContext context);
+  void clear();
+  Future<UserClaim> isClaimExist(String claimName);
+  String getClaimName();
+  void getMethodAndClassName();
+}
 
-  static String claimName = "";
-  static List<UserClaim> authorizedUsersClaimList = <UserClaim>[]; //yetkili
-  static String className = ""; //tetiklenen className bilgisi
-  static String methodName = ""; //tetiklenen metod bilgisi
+class PermissionManager extends IPermission {
+  List<UserClaim> authorizedUsersClaimList = <UserClaim>[];
+  String className = "";
+  String methodName = "";
 
-  static Future<UserClaim> permissionControl(
-      BuildContext context, VoidCallback parameterAsFunction) async {
-    UserClaim result;
-    try {
-      claimName = getClaimName();
-      result = await isClaimExist(claimName);
-      if (result.claimList != null) {
-        parameterAsFunction();
-      } else {
-        Permission.initialPage = false;
-        print("claim not exist");
-      }
-      return result;
-    } catch (e) {
-      //show alert message
-      return result;
-    }
-  }
-
-  static void clear() {
-    paymentPageLockIconStatus = false;
-    productPageLockIconStatus = false;
-    initialPage = true;
+  @override
+  void clear() {
     authorizedUsersClaimList.removeWhere((item) => item.isDefaultUser == false);
   }
 
-  static Future<UserClaim> isClaimExist(String claimName) async {
-    UserClaim userClaim = UserClaim();
-    if (authorizedUsersClaimList.length != 0) {
-      authorizedUsersClaimList.any((element) {
-        var isExist = element.claimList
-            .where(
-                (element) => element.type == claimName && element.value == true)
-            .isNotEmpty; //claim varsa true yoksa false dönüyor.
-        if (isExist) {
-          userClaim = element;
-          return true;
-        }
-        return false;
-      });
-      return userClaim;
-    }
-    return userClaim;
-  }
-
-  static String getClaimName() {
-    parseTrace(); //tetiklenen metodun ismini ve className bilgisini set eder.
-    var libraryMirrorList = reflector.libraries.values
-        .toList(); //reflector kullanılan sınıfları listeler
-    var libraryMirror = libraryMirrorList
-        .firstWhere((element) => element.declarations.keys.contains(className));
-    ClassMirror classMirror = libraryMirror.declarations[className];
-    return (classMirror.instanceMembers[methodName].metadata[0] as Claims)
-        .claimName;
-  }
-
-  static void parseTrace() {
+  @override
+  void getMethodAndClassName() {
     var stack = StackTrace.current;
     var frames = stack.toString().split("\n");
-    var indexOfWhiteSpace = frames[3].indexOf(' ');
-    var subStr = frames[3].substring(indexOfWhiteSpace);
+    var indexOfWhiteSpace = frames[2].indexOf(' ');
+    var subStr = frames[2].substring(indexOfWhiteSpace);
     var indexOfFunction = subStr.indexOf(RegExp(r'[A-Za-z0-9]'));
     subStr = subStr.substring(indexOfFunction);
     indexOfWhiteSpace = subStr.indexOf(' ');
@@ -86,5 +40,71 @@ class Permission {
     var afterCommand = subStr.split('.');
     methodName = afterCommand[1];
     className = afterCommand[0];
+  }
+
+  @override
+  Future<UserClaim> isClaimExist(String claimName) {
+    UserClaim userClaim = UserClaim();
+    if (authorizedUsersClaimList.length != 0) {
+      authorizedUsersClaimList.any((element) {
+        var isExist = element.claimList
+            .where(
+                (element) => element.type == claimName && element.value == true)
+            .isNotEmpty;
+        if (isExist) {
+          userClaim = element;
+          return true;
+        }
+        return false;
+      });
+      return Future.value(userClaim);
+    }
+    return Future.value(userClaim);
+  }
+
+  @override
+  Future<UserClaim> permissionControl(
+      VoidCallback parameterAsFunction, BuildContext context) async {
+    UserClaim result;
+    try {
+      result = await isClaimExist(getClaimName());
+      if (result.claimList != null) {
+        parameterAsFunction();
+      } else {
+        final snackBar = SnackBar(content: Text('Yay! A SnackBar!'));
+        ScaffoldMessenger.of(context).showSnackBar(snackBar);
+      }
+      return result;
+    } catch (e) {
+      return result;
+    }
+  }
+
+  @override
+  String getClaimName() {
+    var libraryMirrorList = reflector.libraries.values.toList();
+    var libraryMirror = libraryMirrorList
+        .firstWhere((element) => element.declarations.keys.contains(className));
+    ClassMirror classMirror = libraryMirror.declarations[className];
+    return (classMirror.instanceMembers[methodName].metadata[0] as Claims)
+        .claimName;
+  }
+}
+
+class Permission{
+  static PermissionManager manager=PermissionManager();
+  static Stream<dynamic> stream;
+  static StreamController<dynamic> streamController;
+  static StreamSubscription<dynamic> listen(BuildContext context) {
+    return stream.listen((event) async {
+      await manager.permissionControl(event, context);
+    });
+  }
+}
+
+extension StreamControllerAdd on StreamController<dynamic> {
+  void addMethod(dynamic event) {
+    Permission.manager.getMethodAndClassName();
+    this.add(event);
   }
 }
